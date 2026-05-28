@@ -817,6 +817,7 @@ interface AppState {
     minConfirmDelayMs?: number
     messageAlign?: 'left' | 'center'
     tone?: 'danger' | 'warning'
+    dismissible?: boolean
     action?: (checkboxChecked?: boolean) => void
     cancelAction?: (checkboxChecked?: boolean) => void
   } | null

@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { initStore } from './store'
 import { useStore } from './store'
 import { buildSettingsFromUrlParams, clearUrlSettingParams, hasUrlSettingParams } from './lib/urlSettings'
-import { bootstrapSmalliceSession } from './lib/smalliceSession'
+import { bootstrapSmalliceSession, fetchSmalliceSession, getSmalliceMainSiteUrl } from './lib/smalliceSession'
 import { useDockerApiUrlMigrationNotice } from './hooks/useDockerApiUrlMigrationNotice'
 import Header from './components/Header'
 import SearchBar from './components/SearchBar'
@@ -22,11 +22,31 @@ import { useGlobalClickSuppression } from './lib/clickSuppression'
 export default function App() {
   const setSettings = useStore((s) => s.setSettings)
   const appMode = useStore((s) => s.appMode)
+  const setConfirmDialog = useStore((s) => s.setConfirmDialog)
   useDockerApiUrlMigrationNotice()
   useGlobalClickSuppression()
 
   useEffect(() => {
-    void bootstrapSmalliceSession()
+    let cancelled = false
+
+    void (async () => {
+      await bootstrapSmalliceSession().catch(() => undefined)
+      const session = await fetchSmalliceSession().catch(() => null)
+      if (cancelled || session?.authenticated) return
+
+      const mainSiteUrl = getSmalliceMainSiteUrl()
+      setConfirmDialog({
+        title: '需要登录 Smallice AI',
+        message: '未获取到 Smallice AI 登录信息。\n\n请先返回主站完成登录，然后从主站入口重新打开 Draw。',
+        confirmText: '返回主站登录',
+        showCancel: false,
+        icon: 'info',
+        dismissible: false,
+        action: () => {
+          window.location.assign(mainSiteUrl)
+        },
+      })
+    })()
 
     const searchParams = new URLSearchParams(window.location.search)
     const nextSettings = buildSettingsFromUrlParams(useStore.getState().settings, searchParams)
@@ -42,7 +62,10 @@ export default function App() {
     }
 
     initStore()
-  }, [setSettings])
+    return () => {
+      cancelled = true
+    }
+  }, [setConfirmDialog, setSettings])
 
   useEffect(() => {
     const preventPageImageDrag = (e: DragEvent) => {

@@ -68,6 +68,7 @@ export default function ConfirmDialog() {
 
   const handleClose = () => {
     if (!canConfirm) return
+    if (confirmDialog?.dismissible === false) return
     setConfirmDialog(null)
   }
 
