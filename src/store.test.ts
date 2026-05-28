@@ -1347,6 +1347,93 @@ describe('agent context for removed outputs', () => {
   })
 })
 
+describe('agent partial failures', () => {
+  const responsesProfile = createDefaultOpenAIProfile({
+    id: 'responses-profile',
+    apiKey: 'test-key',
+    apiMode: 'responses',
+    model: DEFAULT_RESPONSES_MODEL,
+    streamImages: false,
+  })
+
+  beforeEach(async () => {
+    await clearImages()
+    vi.mocked(callAgentResponsesApi).mockClear()
+    vi.mocked(callBatchImageSingle).mockClear()
+    useStore.setState({
+      settings: normalizeSettings({
+        ...DEFAULT_SETTINGS,
+        apiKey: 'test-key',
+        apiMode: 'responses',
+        model: DEFAULT_RESPONSES_MODEL,
+        profiles: [responsesProfile],
+        activeProfileId: responsesProfile.id,
+      }),
+      prompt: '画两张图',
+      inputImages: [],
+      maskDraft: null,
+      params: { ...DEFAULT_PARAMS },
+      appMode: 'agent',
+      tasks: [],
+      agentConversations: [agentConversation({ id: 'conversation-a', activeRoundId: null })],
+      activeAgentConversationId: 'conversation-a',
+      agentEditingRoundId: null,
+      showToast: vi.fn(),
+    })
+  })
+
+  it('keeps successful batch images visible when the continuation request fails', async () => {
+    vi.mocked(callAgentResponsesApi)
+      .mockResolvedValueOnce({
+        text: '',
+        images: [],
+        outputItems: [{
+          type: 'function_call',
+          name: 'generate_image_batch',
+          call_id: 'batch-call',
+          arguments: JSON.stringify({
+            images: [
+              { id: 'success-image', prompt: '第一张图' },
+              { id: 'failed-image', prompt: '第二张图' },
+            ],
+          }),
+        }],
+        responseId: 'response-1',
+      })
+      .mockRejectedValueOnce(new Error('524 Gateway Timeout'))
+    vi.mocked(callBatchImageSingle).mockImplementation(async (opts) => ({
+      batchItemId: opts.batchItemId,
+      image: opts.batchItemId === 'success-image'
+        ? { dataUrl: 'data:image/png;base64,batch-output', revisedPrompt: opts.prompt }
+        : null,
+      error: opts.batchItemId === 'success-image' ? null : '单图失败',
+    }))
+
+    await submitAgentMessage()
+    let round = useStore.getState().agentConversations[0].rounds.find((item) => item.prompt === '画两张图')
+    for (let i = 0; i < 20 && round?.status !== 'error'; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      round = useStore.getState().agentConversations[0].rounds.find((item) => item.prompt === '画两张图')
+    }
+
+    const state = useStore.getState()
+    const conversation = state.agentConversations[0]
+    const assistantMessage = conversation.messages.find((message) => message.roundId === round?.id && message.role === 'assistant')
+    const doneTasks = state.tasks.filter((item) => item.agentRoundId === round?.id && item.status === 'done')
+    const failedTasks = state.tasks.filter((item) => item.agentRoundId === round?.id && item.status === 'error')
+
+    expect(round).toMatchObject({ status: 'error', error: '524 Gateway Timeout' })
+    expect(doneTasks).toHaveLength(1)
+    expect(doneTasks[0].outputImages).toHaveLength(1)
+    expect(failedTasks).toHaveLength(1)
+    expect(assistantMessage?.content).toContain('已保留本轮已生成的图片')
+    expect(assistantMessage?.content).toContain('524 Gateway Timeout')
+    expect(assistantMessage?.content.startsWith('请求失败：')).toBe(false)
+    expect(assistantMessage?.outputTaskIds).toEqual(round?.outputTaskIds)
+    expect(round?.outputTaskIds).toEqual(expect.arrayContaining(doneTasks.map((item) => item.id)))
+  })
+})
+
 describe('agent batch reference resolution', () => {
   const responsesProfile = createDefaultOpenAIProfile({
     id: 'responses-profile',

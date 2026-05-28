@@ -130,6 +130,14 @@ function createOpenAITimeoutError(timeoutSeconds: number, profile?: TimeoutStrea
   return `请求超时：超过 ${timeoutSeconds} 秒仍未完成，请稍后重试或提高超时时间。${getTimeoutStreamingHint(profile)}`
 }
 
+function buildAgentFailureContent(message: string, existingContent: string | undefined, hasPartialOutput: boolean) {
+  if (!hasPartialOutput) return `请求失败：${message}`
+
+  const preservedContent = existingContent?.replace(/^请求失败：/, '').trim()
+  const failureNotice = `后续请求失败：${message}`
+  return preservedContent ? `${preservedContent}\n\n${failureNotice}` : `已保留本轮已生成的图片。\n\n${failureNotice}`
+}
+
 export function getCachedImage(id: string): string | undefined {
   const dataUrl = imageCache.get(id)
   if (dataUrl) {
@@ -3420,6 +3428,18 @@ async function executeAgentRound(
         if (batchResult.image && !shouldStreamAssistantMessage) {
           await completeAgentImageTask({ ...batchResult.image, toolCallId: batchToolCallId }, batchResult.rawResponsePayload)
         }
+        if (!batchResult.image && !controller.signal.aborted) {
+          const taskId = taskIdByToolCallId.get(batchToolCallId)
+          const latestTask = taskId ? useStore.getState().tasks.find((task) => task.id === taskId) : null
+          if (taskId && latestTask?.status === 'running') {
+            updateTaskInStore(taskId, {
+              status: 'error',
+              error: batchResult.error || '接口未返回图片数据',
+              finishedAt: Date.now(),
+              elapsed: Date.now() - latestTask.createdAt,
+            })
+          }
+        }
 
         return batchResult
       })
@@ -3729,22 +3749,34 @@ async function executeAgentRound(
       message += `\n${networkErrorHint}`
     }
 
+    const failureState = useStore.getState()
+    const tasksAtFailure = failureState.tasks
+
     updateAgentConversation(conversationId, (current) => {
       const failedRound = current.rounds.find((round) => round.id === roundId)
       const existingAssistantMessage = failedRound?.assistantMessageId
         ? current.messages.find((item) => item.id === failedRound.assistantMessageId)
         : current.messages.find((item) => item.roundId === roundId && item.role === 'assistant')
-      const errorContent = `请求失败：${message}`
+      const outputTaskIds = uniqueIds([
+        ...(failedRound?.outputTaskIds ?? []),
+        ...(existingAssistantMessage?.outputTaskIds ?? []),
+      ])
+      const hasPartialOutput = outputTaskIds.some((taskId) => {
+        const task = tasksAtFailure.find((item) => item.id === taskId)
+        return task?.status === 'done' && (task.outputImages?.length ?? 0) > 0
+      })
+      const errorContent = buildAgentFailureContent(message, existingAssistantMessage?.content, hasPartialOutput)
 
       return {
         ...current,
-        title: current.rounds.length === 1 && current.rounds[0].id === roundId ? '新对话' : current.title,
+        title: !hasPartialOutput && current.rounds.length === 1 && current.rounds[0].id === roundId ? '新对话' : current.title,
         updatedAt: Date.now(),
         rounds: current.rounds.map((round) =>
           round.id === roundId
             ? {
                 ...round,
                 ...(existingAssistantMessage ? { assistantMessageId: existingAssistantMessage.id } : {}),
+                outputTaskIds,
                 status: 'error',
                 error: message,
                 finishedAt: Date.now(),
@@ -3752,7 +3784,11 @@ async function executeAgentRound(
             : round,
         ),
         messages: existingAssistantMessage
-          ? current.messages.map((item) => item.id === existingAssistantMessage.id ? { ...item, content: errorContent } : item)
+          ? current.messages.map((item) =>
+              item.id === existingAssistantMessage.id
+                ? { ...item, content: errorContent, outputTaskIds }
+                : item,
+            )
           : [
               ...current.messages,
               {
@@ -3760,11 +3796,22 @@ async function executeAgentRound(
                 role: 'assistant',
                 content: errorContent,
                 roundId,
+                outputTaskIds,
                 createdAt: Date.now(),
               },
             ],
       }
     })
+    for (const task of tasksAtFailure) {
+      if (task.agentConversationId !== conversationId || task.agentRoundId !== roundId) continue
+      if (task.status !== 'running' || task.outputImages.length > 0) continue
+      updateTaskInStore(task.id, {
+        status: 'error',
+        error: message,
+        finishedAt: Date.now(),
+        elapsed: Date.now() - task.createdAt,
+      })
+    }
     useStore.getState().showToast(`Agent 请求失败：${message}`, 'error')
   } finally {
     if (agentRoundControllers.get(controllerKey) === controller) {
