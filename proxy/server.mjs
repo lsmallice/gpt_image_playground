@@ -13,6 +13,7 @@ const PROFILE_CACHE_MS = Number(process.env.PROFILE_CACHE_MS || 30000);
 const GATEWAY_REQUEST_TIMEOUT_MS = Number(process.env.GATEWAY_REQUEST_TIMEOUT_MS || 1800000);
 const API_PREFIX = "/tools/draw-api";
 const OPENAI_PREFIX = `${API_PREFIX}/v1`;
+const SELECTED_KEY_HEADER_NAME = "x-smallice-draw-key-id";
 
 const profileCache = new Map();
 const keyCache = new Map();
@@ -156,14 +157,19 @@ async function proxyGateway(clientReq, clientRes, requestUrl) {
     return;
   }
 
-  const selectedId = getCookie(clientReq.headers.cookie, KEY_COOKIE_NAME);
-  let selected = keys.find((key) => key.id === selectedId);
-  if (selectedId && !selected) {
+  const requestedKeyId = getHeaderString(clientReq.headers, SELECTED_KEY_HEADER_NAME);
+  const cookieKeyId = getCookie(clientReq.headers.cookie, KEY_COOKIE_NAME);
+  let selected = keys.find((key) => key.id === requestedKeyId) || keys.find((key) => key.id === cookieKeyId);
+  if ((requestedKeyId || cookieKeyId) && !selected) {
     keys = await listUserKeys(session.token, { forceRefresh: true }).catch(() => keys);
-    selected = keys.find((key) => key.id === selectedId);
+    selected = keys.find((key) => key.id === requestedKeyId) || keys.find((key) => key.id === cookieKeyId);
+  }
+  if (requestedKeyId && (!selected || selected.id !== requestedKeyId)) {
+    sendOpenAIError(clientRes, 403, "invalid_key", "该 API Key 不存在或不属于当前用户，请刷新 Key 列表后重试。");
+    return;
   }
   selected ||= keys[0];
-  if (!selectedId || selected.id !== selectedId) {
+  if (!cookieKeyId || selected.id !== cookieKeyId) {
     setCookie(clientRes, KEY_COOKIE_NAME, selected.id);
   }
 
@@ -334,10 +340,17 @@ function sanitizeHeaders(sourceHeaders) {
   delete headers["x-user-email"];
   delete headers["x-user-name"];
   delete headers["x-user-role"];
+  delete headers[SELECTED_KEY_HEADER_NAME];
   delete headers["cf-connecting-ip"];
   delete headers["cf-ipcountry"];
   delete headers["cf-ray"];
   return headers;
+}
+
+function getHeaderString(headers, name) {
+  const value = headers[name];
+  const raw = Array.isArray(value) ? value[0] : value;
+  return String(raw || "").trim().slice(0, 128);
 }
 
 function normalizeProxyResponseHeaders(headers) {
