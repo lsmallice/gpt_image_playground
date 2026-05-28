@@ -26,7 +26,7 @@ import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiP
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { DEFAULT_DROPDOWN_MAX_HEIGHT, getDropdownMaxHeight } from '../lib/dropdown'
-import { fetchSmalliceKeys, fetchSmalliceSession, selectSmalliceKey, type SmalliceApiKey, type SmalliceSession } from '../lib/smalliceSession'
+import { fetchSmalliceKeys, fetchSmalliceSession, getSmalliceMainSiteUrl, selectSmalliceKey, type SmalliceApiKey, type SmalliceSession } from '../lib/smalliceSession'
 import Select from './Select'
 import { Checkbox } from './Checkbox'
 import ViewportTooltip from './ViewportTooltip'
@@ -420,6 +420,7 @@ export default function SettingsModal() {
   }, [activeTab, refreshSmalliceKeys, showSettings])
 
   const selectedSmalliceKeyId = smalliceSession?.selectedKeyId ?? smalliceKeys[0]?.id ?? ''
+  const smalliceMainSiteUrl = getSmalliceMainSiteUrl()
   const smalliceKeyOptions = smalliceKeys.length
     ? smalliceKeys.map((key) => ({
         label: `${key.name}${key.groupName ? ` · ${key.groupName}` : ''}`,
@@ -1567,9 +1568,19 @@ export default function SettingsModal() {
                   className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
                 />
                 <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
-                  {smalliceSession?.authenticated
-                    ? '仅展示 Key 名称和分组，实际密钥由 Smallice 服务端代理注入。'
-                    : '请从 Sub2API 内嵌入口进入，或重新登录后再打开 Draw。'}
+                  {smalliceSession?.authenticated ? (
+                    <>仅展示 Key 名称和分组，实际密钥由 Smallice 服务端代理注入。</>
+                  ) : (
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                      <span>未获取到登录信息，请返回 Smallice AI 主站登录后再打开 Draw。</span>
+                      <a
+                        href={smalliceMainSiteUrl}
+                        className="font-medium text-blue-600 transition hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                      >
+                        返回主站登录
+                      </a>
+                    </div>
+                  )}
                   {smalliceKeyError ? <span className="ml-1 text-red-500">{smalliceKeyError}</span> : null}
                 </div>
               </div>

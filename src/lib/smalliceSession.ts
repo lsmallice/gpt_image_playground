@@ -18,6 +18,13 @@ export interface SmalliceSession {
   selectedKeyId: string | null
 }
 
+export function getSmalliceMainSiteUrl(): string {
+  const configuredUrl = import.meta.env.VITE_SMALLICE_MAIN_SITE_URL?.trim()
+  if (configuredUrl) return configuredUrl
+
+  return window.location.origin
+}
+
 export async function bootstrapSmalliceSession(): Promise<void> {
   const url = new URL(window.location.href)
   const token = url.searchParams.get('token')?.trim()

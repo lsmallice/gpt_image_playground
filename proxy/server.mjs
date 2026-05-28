@@ -75,7 +75,7 @@ async function bootstrapSession(req, res) {
   const body = await readJsonBody(req);
   const token = cleanToken(body?.token);
   if (!token) {
-    sendJson(res, 401, { error: { code: "session_expired", message: "缺少登录 Token，请从 Smallice AI 入口重新打开 Draw。" } });
+    sendJson(res, 401, { error: { code: "session_expired", message: "未获取到登录信息，请返回 Smallice AI 主站登录后再打开 Draw。" } });
     return;
   }
 
@@ -83,7 +83,7 @@ async function bootstrapSession(req, res) {
   if (!profile) {
     clearCookie(res, COOKIE_NAME);
     clearCookie(res, KEY_COOKIE_NAME);
-    sendJson(res, 401, { error: { code: "session_expired", message: "登录状态已失效，请重新登录 Smallice AI。" } });
+    sendJson(res, 401, { error: { code: "session_expired", message: "登录状态已失效，请返回 Smallice AI 主站重新登录后再打开 Draw。" } });
     return;
   }
 
@@ -216,7 +216,7 @@ async function getSession(req, res, sendError = true) {
   const token = cleanToken(getCookie(req.headers.cookie, COOKIE_NAME));
   if (!token) {
     if (sendError) {
-      sendJson(res, 401, { error: { code: "session_expired", message: "登录状态已失效，请从 Smallice AI 入口重新打开 Draw。" } });
+      sendJson(res, 401, { error: { code: "session_expired", message: "未获取到登录信息，请返回 Smallice AI 主站登录后再打开 Draw。" } });
     }
     return null;
   }
@@ -226,7 +226,7 @@ async function getSession(req, res, sendError = true) {
     clearCookie(res, COOKIE_NAME);
     clearCookie(res, KEY_COOKIE_NAME);
     if (sendError) {
-      sendJson(res, 401, { error: { code: "session_expired", message: "登录状态已失效，请重新登录 Smallice AI。" } });
+      sendJson(res, 401, { error: { code: "session_expired", message: "登录状态已失效，请返回 Smallice AI 主站重新登录后再打开 Draw。" } });
     }
     return null;
   }
