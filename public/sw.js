@@ -1,4 +1,4 @@
-const CACHE_NAME = 'gpt-image-playground-v0.1.5'
+const CACHE_NAME = 'smallice-draw-v20260528-1'
 const APP_SHELL = ['./', './index.html', './manifest.webmanifest', './pwa-icon.svg']
 
 self.addEventListener('install', (event) => {
@@ -24,6 +24,11 @@ self.addEventListener('fetch', (event) => {
 
   const url = new URL(request.url)
   if (url.origin !== self.location.origin) return
+
+  if (url.pathname.startsWith('/tools/draw-api/')) {
+    event.respondWith(fetch(request, { cache: 'no-store' }))
+    return
+  }
 
   if (request.mode === 'navigate') {
     event.respondWith(

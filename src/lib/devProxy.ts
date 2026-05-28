@@ -8,11 +8,12 @@ export interface DevProxyConfig {
   secure: boolean
 }
 
-const DEFAULT_PROXY_PREFIX = '/api-proxy'
+const DEFAULT_PROXY_PREFIX = '/tools/draw-api/v1'
 
 export function normalizeBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim()
   if (!trimmed) return ''
+  if (trimmed.startsWith('/')) return trimmed.replace(/\/+$/, '')
 
   const input = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//.test(trimmed)
     ? trimmed
@@ -87,11 +88,13 @@ export function readClientDevProxyConfig(): DevProxyConfig | null {
 }
 
 export function isApiProxyAvailable(proxyConfig: DevProxyConfig | null = readClientDevProxyConfig()): boolean {
-  return readRuntimeEnv(import.meta.env.VITE_API_PROXY_AVAILABLE) === 'true' || Boolean(proxyConfig?.enabled)
+  const value = readRuntimeEnv(import.meta.env.VITE_API_PROXY_AVAILABLE)
+  return value === 'false' ? Boolean(proxyConfig?.enabled) : true
 }
 
 export function isApiProxyLocked(proxyConfig: DevProxyConfig | null = readClientDevProxyConfig()): boolean {
-  return readRuntimeEnv(import.meta.env.VITE_API_PROXY_LOCKED) === 'true' && isApiProxyAvailable(proxyConfig)
+  const value = readRuntimeEnv(import.meta.env.VITE_API_PROXY_LOCKED)
+  return value !== 'false' && isApiProxyAvailable(proxyConfig)
 }
 
 export function shouldUseApiProxy(apiProxy: boolean, proxyConfig: DevProxyConfig | null = readClientDevProxyConfig()): boolean {

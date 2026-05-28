@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "proxy": "node proxy/server.mjs",
     "mock:api": "node scripts/mock-image-api.mjs",
     "build": "tsc -b && vite build",
     "deploy:cf": "npm run build && wrangler deploy",

@@ -5,8 +5,6 @@ import { isApiProxyAvailable, isApiProxyLocked, readClientDevProxyConfig } from 
 import { useStore, exportData, importData, clearData, type SettingsTab } from '../store'
 import {
   createDefaultOpenAIProfile,
-  DEFAULT_FAL_BASE_URL,
-  DEFAULT_FAL_MODEL,
   DEFAULT_IMAGES_MODEL,
   DEFAULT_OPENAI_PROFILE_ID,
   DEFAULT_RESPONSES_MODEL,
@@ -28,6 +26,7 @@ import { DEFAULT_AGENT_MAX_TOOL_ROUNDS, DEFAULT_STREAM_PARTIAL_IMAGES, type ApiP
 import { useCloseOnEscape } from '../hooks/useCloseOnEscape'
 import { usePreventBackgroundScroll } from '../hooks/usePreventBackgroundScroll'
 import { DEFAULT_DROPDOWN_MAX_HEIGHT, getDropdownMaxHeight } from '../lib/dropdown'
+import { fetchSmalliceKeys, fetchSmalliceSession, selectSmalliceKey, type SmalliceApiKey, type SmalliceSession } from '../lib/smalliceSession'
 import Select from './Select'
 import { Checkbox } from './Checkbox'
 import ViewportTooltip from './ViewportTooltip'
@@ -37,8 +36,8 @@ function newId(prefix: string) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
 }
 
-const ADD_CUSTOM_PROVIDER_VALUE = '__add_custom_provider__'
 const COPY_IMPORT_URL_OPTIONS_STORAGE_KEY = 'gpt-image-playground.copy-import-url-options'
+const ADD_CUSTOM_PROVIDER_VALUE = '__add_custom_provider__'
 
 const DEFAULT_COPY_IMPORT_URL_OPTIONS = {
   includeApiKey: false,
@@ -161,7 +160,7 @@ function isPristineNewOpenAIProfile(profile: ApiProfile) {
   return profile.name === '新配置' &&
     profile.provider === 'openai' &&
     profile.baseUrl === DEFAULT_SETTINGS.baseUrl &&
-    profile.apiKey === '' &&
+    profile.apiKey === defaultProfile.apiKey &&
     profile.model === DEFAULT_IMAGES_MODEL &&
     profile.timeout === DEFAULT_SETTINGS.timeout &&
     profile.apiMode === 'images' &&
@@ -304,7 +303,10 @@ export default function SettingsModal() {
   const [draft, setDraft] = useState<AppSettings>(normalizeSettings(settings))
   const [timeoutInput, setTimeoutInput] = useState(String(getActiveApiProfile(settings).timeout))
   const [agentMaxToolRoundsInput, setAgentMaxToolRoundsInput] = useState(String(settings.agentMaxToolRounds))
-  const [showApiKey, setShowApiKey] = useState(false)
+  const [smalliceSession, setSmalliceSession] = useState<SmalliceSession | null>(null)
+  const [smalliceKeys, setSmalliceKeys] = useState<SmalliceApiKey[]>([])
+  const [smalliceKeyLoading, setSmalliceKeyLoading] = useState(false)
+  const [smalliceKeyError, setSmalliceKeyError] = useState<string | null>(null)
   const [showProfileMenu, setShowProfileMenu] = useState(false)
   const [profileMenuMaxHeight, setProfileMenuMaxHeight] = useState(DEFAULT_DROPDOWN_MAX_HEIGHT)
   const [showCustomProviderImport, setShowCustomProviderImport] = useState(false)
@@ -345,43 +347,12 @@ export default function SettingsModal() {
   const apiProxyLocked = isApiProxyLocked(apiProxyConfig)
   const activeProfile = draft.profiles.find((profile) => profile.id === draft.activeProfileId) ?? draft.profiles[0] ?? getActiveApiProfile(draft)
   const activeProviderIsOpenAICompatible = isOpenAICompatibleProvider(draft, activeProfile.provider)
-  const activeProviderUsesApiUrl = activeProviderIsOpenAICompatible || activeProfile.provider === 'fal'
-  const activeCustomProvider = draft.customProviders.find((provider) => provider.id === activeProfile.provider)
+  const activeProviderUsesApiUrl: boolean = false
   const activeProfileApiProxyEligible = isProfileApiProxyEligible(draft, activeProfile)
-  const activeCustomProviderAsync = isAsyncCustomProvider(activeCustomProvider)
+  const activeCustomProviderAsync: boolean = false
+  const showApiProxySetting = false
   const apiProxyChecked = activeProfileApiProxyEligible && (apiProxyLocked || activeProfile.apiProxy)
   const apiProxyEnabled = apiProxyAvailable && activeProfileApiProxyEligible && apiProxyChecked
-  const defaultProviderOrder = ['openai', 'fal', ...draft.customProviders.map(p => p.id)]
-  const providerOrder = draft.providerOrder || defaultProviderOrder
-
-  const unorderedProviderOptions = [
-    { label: 'OpenAI 兼容接口', value: 'openai', draggable: true },
-    { label: 'fal.ai', value: 'fal', draggable: true },
-    ...draft.customProviders.map((provider) => ({
-      label: provider.name,
-      value: provider.id,
-      draggable: true,
-      actions: [
-        { label: '编辑', onClick: () => openEditCustomProvider(provider) },
-        {
-          label: '删除',
-          variant: 'danger' as const,
-          onClick: () => confirmDeleteCustomProvider(provider),
-        },
-      ],
-    })),
-  ]
-
-  const providerOptions = [
-    { label: '创建自定义服务商', value: ADD_CUSTOM_PROVIDER_VALUE, variant: 'action' as const },
-    ...unorderedProviderOptions.sort((a, b) => {
-      const aIndex = providerOrder.indexOf(String(a.value))
-      const bIndex = providerOrder.indexOf(String(b.value))
-      const validA = aIndex !== -1 ? aIndex : defaultProviderOrder.indexOf(String(a.value))
-      const validB = bIndex !== -1 ? bIndex : defaultProviderOrder.indexOf(String(b.value))
-      return validA - validB
-    })
-  ]
 
   const getDefaultModelForMode = (apiMode: AppSettings['apiMode']) =>
     apiMode === 'responses' ? DEFAULT_RESPONSES_MODEL : DEFAULT_IMAGES_MODEL
@@ -417,6 +388,56 @@ export default function SettingsModal() {
   useEffect(() => {
     setTimeoutInput(String(activeProfile.timeout))
   }, [activeProfile.id, activeProfile.timeout])
+
+  const refreshSmalliceKeys = useCallback(async () => {
+    setSmalliceKeyLoading(true)
+    setSmalliceKeyError(null)
+    try {
+      const [session, keys] = await Promise.all([
+        fetchSmalliceSession(),
+        fetchSmalliceKeys({ refresh: true }),
+      ])
+      setSmalliceSession(session)
+      setSmalliceKeys(keys)
+    } catch (error) {
+      setSmalliceKeyError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setSmalliceKeyLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!showSettings || activeTab !== 'api') return
+    void refreshSmalliceKeys()
+  }, [activeTab, refreshSmalliceKeys, showSettings])
+
+  useEffect(() => {
+    if (!showSettings || activeTab !== 'api') return
+    const timer = window.setInterval(() => {
+      void refreshSmalliceKeys()
+    }, 15000)
+    return () => window.clearInterval(timer)
+  }, [activeTab, refreshSmalliceKeys, showSettings])
+
+  const selectedSmalliceKeyId = smalliceSession?.selectedKeyId ?? smalliceKeys[0]?.id ?? ''
+  const smalliceKeyOptions = smalliceKeys.length
+    ? smalliceKeys.map((key) => ({
+        label: `${key.name}${key.groupName ? ` · ${key.groupName}` : ''}`,
+        value: key.id,
+      }))
+    : [{ label: smalliceKeyLoading ? '正在读取 Key...' : '暂无可用 API Key', value: '' }]
+
+  const handleSmalliceKeyChange = async (value: string | number) => {
+    const keyId = String(value)
+    if (!keyId) return
+    setSmalliceKeyError(null)
+    try {
+      await selectSmalliceKey(keyId)
+      setSmalliceSession((current) => current ? { ...current, selectedKeyId: keyId } : current)
+    } catch (error) {
+      setSmalliceKeyError(error instanceof Error ? error.message : String(error))
+    }
+  }
 
   useEffect(() => {
     if (showSettings && settingsTabRequest) setActiveTab(settingsTabRequest)
@@ -497,14 +518,12 @@ export default function SettingsModal() {
   const commitSettings = (nextDraft: AppSettings) => {
     const normalizedProfiles = nextDraft.profiles.map((profile) => {
       const nextApiProxy = isProfileApiProxyEligible(nextDraft, profile) && apiProxyAvailable ? (apiProxyLocked || profile.apiProxy) : false
-      const shouldKeepEmptyBaseUrl = profile.provider !== 'fal' && nextApiProxy && !profile.baseUrl.trim()
-      const normalizedBaseUrl = profile.provider === 'fal'
-        ? profile.baseUrl.trim().replace(/\/+$/, '') || DEFAULT_FAL_BASE_URL
-        : shouldKeepEmptyBaseUrl ? '' : normalizeBaseUrl(profile.baseUrl.trim() || DEFAULT_SETTINGS.baseUrl)
-      const defaultModel = profile.provider === 'fal' ? DEFAULT_FAL_MODEL : getDefaultModelForMode(profile.apiMode)
+      const shouldKeepEmptyBaseUrl = nextApiProxy && !profile.baseUrl.trim()
+      const normalizedBaseUrl = shouldKeepEmptyBaseUrl ? '' : normalizeBaseUrl(profile.baseUrl.trim() || DEFAULT_SETTINGS.baseUrl)
+      const defaultModel = getDefaultModelForMode(profile.apiMode)
       return {
         ...profile,
-        name: profile.name.trim() || (profile.id === DEFAULT_OPENAI_PROFILE_ID ? '默认' : '新配置'),
+        name: profile.name.trim() || (profile.id === DEFAULT_OPENAI_PROFILE_ID ? 'Smallice' : '新配置'),
         baseUrl: normalizedBaseUrl,
         model: profile.model.trim() || defaultModel,
         timeout: Number(profile.timeout) || DEFAULT_SETTINGS.timeout,
@@ -878,7 +897,7 @@ export default function SettingsModal() {
   }
 
   const handleProviderReorder = (sourceValue: string | number, targetValue: string | number, position: 'before' | 'after' | null) => {
-    const currentOrder = draft.providerOrder || ['openai', 'fal', ...draft.customProviders.map(p => p.id)]
+    const currentOrder = draft.providerOrder || ['openai', ...draft.customProviders.map(p => p.id)]
     const sourceIndex = currentOrder.indexOf(String(sourceValue))
     const targetIndex = currentOrder.indexOf(String(targetValue))
     if (sourceIndex < 0 || targetIndex < 0) return
@@ -1330,32 +1349,6 @@ export default function SettingsModal() {
                     <span className="relative inline-flex">
                       <button
                         type="button"
-                        onClick={() => confirmCopyProfileImportUrl(activeProfile)}
-                        onMouseEnter={() => setProfileImportUrlTooltipVisible(true)}
-                        onMouseLeave={() => setProfileImportUrlTooltipVisible(false)}
-                        onFocus={() => setProfileImportUrlTooltipVisible(true)}
-                        onBlur={() => setProfileImportUrlTooltipVisible(false)}
-                        onTouchStart={() => {
-                          clearProfileImportUrlTooltipTimer()
-                          profileImportUrlTooltipTimerRef.current = window.setTimeout(() => {
-                            setProfileImportUrlTooltipVisible(true)
-                            profileImportUrlTooltipTimerRef.current = null
-                          }, 450)
-                        }}
-                        onTouchEnd={clearProfileImportUrlTooltipTimer}
-                        onTouchCancel={clearProfileImportUrlTooltipTimer}
-                        className="flex h-5 w-5 items-center justify-center rounded-md text-gray-400 transition hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-white/[0.08] dark:hover:text-gray-200"
-                        aria-label={`复制导入配置「${activeProfile.name}」的 URL`}
-                      >
-                        <LinkIcon className="h-3.5 w-3.5" />
-                      </button>
-                      <ViewportTooltip visible={profileImportUrlTooltipVisible} className="whitespace-nowrap">
-                        复制导入 URL
-                      </ViewportTooltip>
-                    </span>
-                    <span className="relative inline-flex">
-                      <button
-                        type="button"
                         onClick={duplicateActiveProfile}
                         onMouseEnter={() => setDuplicateProfileTooltipVisible(true)}
                         onMouseLeave={() => setDuplicateProfileTooltipVisible(false)}
@@ -1464,19 +1457,6 @@ export default function SettingsModal() {
                                 </div>
                                 
                                 <div className="flex shrink-0 items-center gap-1">
-                                  <button
-                                    type="button"
-                                    onClick={(e) => {
-                                      e.preventDefault()
-                                      e.stopPropagation()
-                                      confirmCopyProfileImportUrl(profile)
-                                    }}
-                                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded text-gray-400 opacity-60 transition-all hover:bg-gray-100 hover:text-gray-600 hover:opacity-100 dark:hover:bg-white/[0.08] dark:hover:text-gray-200"
-                                    aria-label={`复制导入配置「${profile.name}」的 URL`}
-                                    title="复制导入 URL"
-                                  >
-                                    <LinkIcon className="h-3.5 w-3.5" />
-                                  </button>
                                   {draft.profiles.length > 1 && (
                                     <button
                                       type="button"
@@ -1517,18 +1497,6 @@ export default function SettingsModal() {
                 />
               </label>
 
-              {/* 2. 服务商类型 */}
-              <div className="block">
-                <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">服务商类型</span>
-                <Select
-                  value={activeProfile.provider}
-                  onChange={handleProviderTypeChange}
-                  onReorder={handleProviderReorder}
-                  options={providerOptions}
-                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
-                />
-              </div>
-
               {/* 3. API URL */}
               {activeProviderUsesApiUrl && (
                 <label className="block">
@@ -1541,14 +1509,12 @@ export default function SettingsModal() {
                     onBlur={(e) => commitActiveProfilePatch({ baseUrl: e.target.value })}
                     type="text"
                     disabled={apiProxyEnabled}
-                    placeholder={activeProfile.provider === 'fal' ? DEFAULT_FAL_BASE_URL : DEFAULT_SETTINGS.baseUrl}
+                    placeholder={DEFAULT_SETTINGS.baseUrl}
                     className={`w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50 ${apiProxyEnabled ? 'opacity-50 cursor-not-allowed' : ''}`}
                   />
                   <div data-selectable-text className="mt-1.5 min-h-[22px] flex items-center text-xs text-gray-500 dark:text-gray-500">
                     {apiProxyEnabled ? (
                       <span className="text-yellow-600 dark:text-yellow-500">已开启代理，实际请求目标由部署端决定，此处设置被忽略。</span>
-                    ) : activeProfile.provider === 'fal' ? (
-                      <span>默认使用 <code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">{DEFAULT_FAL_BASE_URL}</code>；填写自定义地址时将作为 fal.ai 代理 URL。</span>
                     ) : (
                       <span>支持通过查询参数覆盖：<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">?apiUrl=</code></span>
                     )}
@@ -1557,7 +1523,7 @@ export default function SettingsModal() {
               )}
 
               {/* 4. API 代理（紧跟 URL） */}
-              {apiProxyAvailable && activeProviderIsOpenAICompatible && !activeCustomProviderAsync && (
+              {showApiProxySetting && apiProxyAvailable && activeProviderIsOpenAICompatible && !activeCustomProviderAsync && (
                 <div className="block">
                   <div className="mb-1.5 flex items-center justify-between">
                     <span className="block text-sm text-gray-600 dark:text-gray-300">API 代理</span>
@@ -1581,41 +1547,30 @@ export default function SettingsModal() {
                 </div>
               )}
 
-              {/* 5. API Key */}
+              {/* 5. Smallice API Key */}
               <div className="block">
-                <span className="mb-1.5 block text-sm text-gray-600 dark:text-gray-300">API Key</span>
-                <div className="relative">
-                  <input
-                    value={activeProfile.apiKey}
-                    onChange={(e) => updateActiveProfile({ apiKey: e.target.value })}
-                    onBlur={(e) => commitActiveProfilePatch({ apiKey: e.target.value })}
-                    type={showApiKey ? 'text' : 'password'}
-                    placeholder={activeProfile.provider === 'fal' ? 'FAL_KEY' : 'sk-...'}
-                    className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 pr-10 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
-                  />
+                <div className="mb-1.5 flex items-center justify-between gap-3">
+                  <span className="block text-sm text-gray-600 dark:text-gray-300">Smallice API Key</span>
                   <button
                     type="button"
-                    onClick={() => setShowApiKey((v) => !v)}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-gray-400 hover:text-gray-600 transition-colors"
-                    tabIndex={-1}
+                    onClick={() => void refreshSmalliceKeys()}
+                    className="rounded-lg px-2 py-1 text-xs font-medium text-blue-600 transition hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-500/10"
                   >
-                    {showApiKey ? (
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-                        <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-                        <circle cx="12" cy="12" r="3" />
-                      </svg>
-                    ) : (
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" viewBox="0 0 24 24">
-                        <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94" />
-                        <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19" />
-                        <path d="M14.12 14.12a3 3 0 1 1-4.24-4.24" />
-                        <line x1="1" y1="1" x2="23" y2="23" />
-                      </svg>
-                    )}
+                    刷新
                   </button>
                 </div>
+                <Select
+                  value={selectedSmalliceKeyId}
+                  onChange={handleSmalliceKeyChange}
+                  options={smalliceKeyOptions}
+                  disabled={smalliceKeyLoading || !smalliceKeys.length}
+                  className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
+                />
                 <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
-                  支持通过查询参数覆盖：<code className="bg-gray-100 dark:bg-white/[0.06] px-1 py-0.5 rounded">?apiKey=</code>
+                  {smalliceSession?.authenticated
+                    ? '仅展示 Key 名称和分组，实际密钥由 Smallice 服务端代理注入。'
+                    : '请从 Sub2API 内嵌入口进入，或重新登录后再打开 Draw。'}
+                  {smalliceKeyError ? <span className="ml-1 text-red-500">{smalliceKeyError}</span> : null}
                 </div>
               </div>
 
@@ -1655,15 +1610,11 @@ export default function SettingsModal() {
                   onChange={(e) => updateActiveProfile({ model: e.target.value })}
                   onBlur={(e) => commitActiveProfilePatch({ model: e.target.value })}
                   type="text"
-                  placeholder={activeProfile.provider === 'fal' ? DEFAULT_FAL_MODEL : getDefaultModelForMode(activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode)}
+                  placeholder={getDefaultModelForMode(activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode)}
                   className="w-full rounded-xl border border-gray-200/70 bg-white/60 px-3 py-2.5 text-sm text-gray-700 outline-none transition focus:border-blue-300 dark:border-white/[0.08] dark:bg-white/[0.03] dark:text-gray-200 dark:focus:border-blue-500/50"
                 />
                 <div data-selectable-text className="mt-1.5 text-xs text-gray-500 dark:text-gray-500">
-                  {activeProfile.provider === 'fal' ? (
-                    <>当前适配 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">{DEFAULT_FAL_MODEL}</code>。</>
-                  ) : activeCustomProvider ? (
-                    <>当前使用 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">{activeCustomProvider.name}</code>。</>
-                  ) : (activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode) === 'responses' ? (
+                  {(activeProfile.apiMode ?? DEFAULT_SETTINGS.apiMode) === 'responses' ? (
                     <>Responses API 需要使用支持 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">image_generation</code> 工具的文本模型，例如 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">{DEFAULT_RESPONSES_MODEL}</code>。</>
                   ) : (
                     <>Images API 需要使用 GPT Image 模型，例如 <code className="rounded bg-gray-100 px-1 py-0.5 dark:bg-white/[0.06]">{DEFAULT_IMAGES_MODEL}</code>。</>
@@ -1933,9 +1884,9 @@ export default function SettingsModal() {
                   <div className="mb-5 flex h-[88px] w-[88px] items-center justify-center rounded-full border border-gray-200/80 bg-gray-50/50 text-gray-800 transition-colors group-hover:bg-gray-100 dark:border-white/[0.08] dark:bg-white/[0.02] dark:text-gray-100 dark:group-hover:bg-white/[0.06]">
                     <GithubIcon className="h-11 w-11" />
                   </div>
-                  <h4 className="text-[17px] font-bold text-gray-800 dark:text-gray-100">GPT Image Playground</h4>
+                  <h4 className="text-[17px] font-bold text-gray-800 dark:text-gray-100">Smallice Draw</h4>
                   <p className="mt-1.5 text-[13px] text-gray-500 transition-colors group-hover:text-gray-700 dark:text-gray-400 dark:group-hover:text-gray-300">
-                    @CookSleep
+                    Based on @CookSleep
                   </p>
                 </a>
                 

@@ -18,7 +18,7 @@ import { shouldUseApiProxy } from './devProxy'
 import { readRuntimeEnv } from './runtimeEnv'
 import { isImportableConfigUrl } from './customProviderConfigUrl'
 
-const OPENAI_DEFAULT_BASE_URL = 'https://api.openai.com/v1'
+const OPENAI_DEFAULT_BASE_URL = '/tools/draw-api/v1'
 const RAW_DEFAULT_API_URL = readRuntimeEnv(import.meta.env.VITE_DEFAULT_API_URL)
 const DEFAULT_OPENAI_API_PROXY = readRuntimeEnv(import.meta.env.VITE_API_PROXY_AVAILABLE) === 'true'
 const DOCKER_DEPLOYMENT = readRuntimeEnv(import.meta.env.VITE_DOCKER_DEPLOYMENT) === 'true'
@@ -32,6 +32,9 @@ export const DEFAULT_FAL_MODEL = 'openai/gpt-image-2'
 export const DEFAULT_OPENAI_PROFILE_ID = 'default-openai'
 export const DEFAULT_API_TIMEOUT = 600
 
+const SMALLICE_PROVIDER_ID: ApiProvider = 'openai'
+const SMALLICE_PROFILE_NAME = 'Smallice'
+const SMALLICE_API_KEY_PLACEHOLDER = 'smallice-session'
 const BUILT_IN_PROVIDER_IDS = new Set<ApiProvider>(['openai', 'fal'])
 const DEFAULT_CUSTOM_PROVIDER_PATHS = {
   generationPath: 'images/generations',
@@ -285,10 +288,10 @@ export function normalizeCustomProviderDefinitions(input: unknown): CustomProvid
 export function createDefaultOpenAIProfile(overrides: Partial<ApiProfile> = {}): ApiProfile {
   return {
     id: DEFAULT_OPENAI_PROFILE_ID,
-    name: '默认',
-    provider: 'openai',
+    name: SMALLICE_PROFILE_NAME,
+    provider: SMALLICE_PROVIDER_ID,
     baseUrl: DEFAULT_BASE_URL,
-    apiKey: '',
+    apiKey: SMALLICE_API_KEY_PLACEHOLDER,
     model: DEFAULT_IMAGES_MODEL,
     timeout: DEFAULT_API_TIMEOUT,
     apiMode: 'images',
@@ -319,6 +322,7 @@ export function createDefaultFalProfile(overrides: Partial<ApiProfile> = {}): Ap
 }
 
 export function switchApiProfileProvider(profile: ApiProfile, provider: ApiProvider, customProvider?: CustomProviderDefinition): ApiProfile {
+  provider = SMALLICE_PROVIDER_ID
   const providerDrafts = {
     ...profile.providerDrafts,
     [profile.provider]: {
@@ -416,19 +420,18 @@ function normalizeProviderDrafts(input: unknown, customProviderIds: Set<string>)
 
 export function normalizeApiProfile(input: unknown, fallback?: Partial<ApiProfile>, customProviderIds = new Set<string>()): ApiProfile {
   const record = input && typeof input === 'object' ? input as Record<string, unknown> : {}
-  const rawProvider = typeof record.provider === 'string' ? record.provider : ''
-  const provider: ApiProvider = rawProvider === 'fal' || customProviderIds.has(rawProvider) ? rawProvider : 'openai'
-  const defaults = provider === 'fal' ? createDefaultFalProfile(fallback) : createDefaultOpenAIProfile(fallback)
+  void customProviderIds
+  const provider: ApiProvider = SMALLICE_PROVIDER_ID
+  const defaults = createDefaultOpenAIProfile(fallback)
   const apiMode: ApiMode = record.apiMode === 'responses' ? 'responses' : 'images'
-  const rawBaseUrl = typeof record.baseUrl === 'string' ? record.baseUrl : defaults.baseUrl
 
   return {
     ...defaults,
     id: typeof record.id === 'string' && record.id.trim() ? record.id : defaults.id,
     name: typeof record.name === 'string' && record.name.trim() ? record.name : defaults.name,
     provider,
-    baseUrl: provider === 'fal' ? rawBaseUrl.trim().replace(/\/+$/, '') || DEFAULT_FAL_BASE_URL : rawBaseUrl,
-    apiKey: typeof record.apiKey === 'string' ? record.apiKey : defaults.apiKey,
+    baseUrl: DEFAULT_BASE_URL,
+    apiKey: SMALLICE_API_KEY_PLACEHOLDER,
     model: typeof record.model === 'string' && record.model.trim() ? record.model : defaults.model,
     timeout: typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : defaults.timeout,
     apiMode,
@@ -456,11 +459,11 @@ function validateImportedProfileRecord(input: unknown) {
 
 export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSettings {
   const record = input && typeof input === 'object' ? input as Record<string, unknown> : {}
-  const customProviders = normalizeCustomProviderDefinitions(record.customProviders)
+  const customProviders: CustomProviderDefinition[] = []
   const customProviderIds = new Set(customProviders.map((provider) => provider.id))
   const legacyProfile = createDefaultOpenAIProfile({
-    baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl : DEFAULT_BASE_URL,
-    apiKey: typeof record.apiKey === 'string' ? record.apiKey : '',
+    baseUrl: DEFAULT_BASE_URL,
+    apiKey: SMALLICE_API_KEY_PLACEHOLDER,
     model: typeof record.model === 'string' && record.model.trim() ? record.model : DEFAULT_IMAGES_MODEL,
     timeout: typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : DEFAULT_API_TIMEOUT,
     apiMode: record.apiMode === 'responses' ? 'responses' : 'images',
@@ -473,10 +476,18 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
   const profiles = Array.isArray(record.profiles) && record.profiles.length
     ? record.profiles.map((profile) => normalizeApiProfile(profile, undefined, customProviderIds))
     : [legacyProfile]
-  const activeProfileId = typeof record.activeProfileId === 'string' && profiles.some((p) => p.id === record.activeProfileId)
+  const smalliceProfiles = profiles.map((profile) => ({
+    ...profile,
+    provider: SMALLICE_PROVIDER_ID,
+    baseUrl: DEFAULT_BASE_URL,
+    apiKey: SMALLICE_API_KEY_PLACEHOLDER,
+    codexCli: false,
+    apiProxy: DEFAULT_OPENAI_API_PROXY,
+  }))
+  const activeProfileId = typeof record.activeProfileId === 'string' && smalliceProfiles.some((p) => p.id === record.activeProfileId)
     ? record.activeProfileId
-    : profiles[0].id
-  const active = profiles.find((p) => p.id === activeProfileId) ?? profiles[0]
+    : smalliceProfiles[0].id
+  const active = smalliceProfiles.find((p) => p.id === activeProfileId) ?? smalliceProfiles[0]
 
   return {
     baseUrl: active.baseUrl,
@@ -489,7 +500,7 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     streamImages: active.streamImages,
     streamPartialImages: active.streamPartialImages,
     customProviders,
-    providerOrder: Array.isArray(record.providerOrder) ? record.providerOrder.map(String) : undefined,
+    providerOrder: undefined,
     clearInputAfterSubmit: typeof record.clearInputAfterSubmit === 'boolean' ? record.clearInputAfterSubmit : false,
     persistInputOnRestart: typeof record.persistInputOnRestart === 'boolean' ? record.persistInputOnRestart : true,
     reuseTaskApiProfileTemporarily: typeof record.reuseTaskApiProfileTemporarily === 'boolean' ? record.reuseTaskApiProfileTemporarily : false,
@@ -499,7 +510,7 @@ export function normalizeSettings(input: Partial<AppSettings> | unknown): AppSet
     agentScrollToBottomAfterSubmit: typeof record.agentScrollToBottomAfterSubmit === 'boolean' ? record.agentScrollToBottomAfterSubmit : true,
     agentMaxToolRounds: normalizeAgentMaxToolRounds(record.agentMaxToolRounds),
     agentWebSearch: typeof record.agentWebSearch === 'boolean' ? record.agentWebSearch : false,
-    profiles,
+    profiles: smalliceProfiles,
     activeProfileId,
   }
 }
@@ -510,13 +521,14 @@ export function getCustomProviderDefinition(settings: Partial<AppSettings> | unk
 }
 
 export function getApiProviderLabel(settings: Partial<AppSettings> | unknown, provider: ApiProvider): string {
-  if (provider === 'fal') return 'fal.ai'
-  if (provider === 'openai') return 'OpenAI'
+  if (provider === 'fal') return 'Smallice'
+  if (provider === 'openai') return 'Smallice'
   return getCustomProviderDefinition(settings, provider)?.name ?? provider
 }
 
 export function isOpenAICompatibleProvider(settings: Partial<AppSettings> | unknown, provider: ApiProvider): boolean {
-  return provider === 'openai' || Boolean(getCustomProviderDefinition(settings, provider))
+  void settings
+  return provider === SMALLICE_PROVIDER_ID
 }
 
 export interface ImportedProviderSettings {
@@ -580,38 +592,33 @@ export function importCustomProviderDefinitionFromJson(jsonText: string, existin
 }
 
 export function getActiveApiProfile(settings: Partial<AppSettings> | unknown): ApiProfile {
-  const record = settings && typeof settings === 'object' ? settings as Record<string, unknown> : {}
   const normalized = normalizeSettings(settings)
   const profile = normalized.profiles.find((p) => p.id === normalized.activeProfileId) ?? normalized.profiles[0] ?? createDefaultOpenAIProfile()
 
   return {
     ...profile,
-    baseUrl: typeof record.baseUrl === 'string' ? record.baseUrl : profile.baseUrl,
-    apiKey: typeof record.apiKey === 'string' ? record.apiKey : profile.apiKey,
-    model: typeof record.model === 'string' && record.model.trim() ? record.model : profile.model,
-    timeout: typeof record.timeout === 'number' && Number.isFinite(record.timeout) ? record.timeout : profile.timeout,
-    apiMode: record.apiMode === 'images' || record.apiMode === 'responses' ? record.apiMode : profile.apiMode,
-    codexCli: typeof record.codexCli === 'boolean' ? record.codexCli : profile.codexCli,
-    apiProxy: typeof record.apiProxy === 'boolean' ? record.apiProxy : profile.apiProxy,
-    streamImages: typeof record.streamImages === 'boolean' ? record.streamImages : profile.streamImages,
-    streamPartialImages: normalizeStreamPartialImages(record.streamPartialImages, profile.streamPartialImages),
+    provider: SMALLICE_PROVIDER_ID,
+    baseUrl: DEFAULT_BASE_URL,
+    apiKey: SMALLICE_API_KEY_PLACEHOLDER,
+    codexCli: false,
+    apiProxy: DEFAULT_OPENAI_API_PROXY,
   }
 }
 
 export function validateApiProfile(profile: ApiProfile): string | null {
   if (!profile.name.trim()) return '缺少名称'
   if (profile.provider !== 'fal' && !profile.baseUrl.trim() && !shouldUseApiProxy(profile.apiProxy)) return '缺少 API URL'
-  if (!profile.apiKey.trim()) return '缺少 API Key'
+  if (!profile.apiKey.trim() && !shouldUseApiProxy(profile.apiProxy)) return '缺少 API Key'
   if (!profile.model.trim()) return '缺少模型 ID'
   return null
 }
 
 function isDefaultOpenAIProfile(profile: ApiProfile): boolean {
   return profile.id === DEFAULT_OPENAI_PROFILE_ID &&
-    profile.name === '默认' &&
+    profile.name === 'Smallice' &&
     profile.provider === 'openai' &&
     profile.baseUrl === DEFAULT_BASE_URL &&
-    profile.apiKey === '' &&
+    profile.apiKey === 'smallice-session' &&
     profile.model === DEFAULT_IMAGES_MODEL &&
     profile.timeout === DEFAULT_API_TIMEOUT &&
     profile.apiMode === 'images' &&
@@ -767,7 +774,7 @@ export function mergeImportedSettings(currentSettings: Partial<AppSettings> | un
 
 export const DEFAULT_SETTINGS: AppSettings = normalizeSettings({
   baseUrl: DEFAULT_BASE_URL,
-  apiKey: '',
+  apiKey: 'smallice-session',
   model: DEFAULT_IMAGES_MODEL,
   timeout: DEFAULT_API_TIMEOUT,
   apiMode: 'images',

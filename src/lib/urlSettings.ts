@@ -1,11 +1,8 @@
 import type { ApiMode, AppSettings } from '../types'
-import { normalizeBaseUrl } from './devProxy'
 import {
   createDefaultOpenAIProfile,
   DEFAULT_IMAGES_MODEL,
   DEFAULT_RESPONSES_MODEL,
-  findEquivalentApiProfile,
-  mergeImportedSettings,
   normalizeSettings,
   normalizeStreamPartialImages,
 } from './apiProfiles'
@@ -32,48 +29,6 @@ function createUrlProfileId(usedIds: Set<string>) {
   return id
 }
 
-function pickUrlSettingsPayload(value: unknown): unknown | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const record = value as Record<string, unknown>
-  return {
-    customProviders: record.customProviders,
-    profiles: record.profiles,
-  }
-}
-
-function getUrlSettingsPayload(searchParams: URLSearchParams): unknown | null {
-  const raw = searchParams.get('settings')
-  if (!raw) return null
-
-  try {
-    const parsed = JSON.parse(raw)
-    if (parsed && typeof parsed === 'object' && 'settings' in parsed) {
-      return pickUrlSettingsPayload((parsed as { settings?: unknown }).settings ?? null)
-    }
-    return pickUrlSettingsPayload(parsed)
-  } catch {
-    return null
-  }
-}
-
-function activateFirstImportedProfile(settings: AppSettings, importedSettings: unknown): AppSettings {
-  if (!importedSettings || typeof importedSettings !== 'object' || Array.isArray(importedSettings)) return settings
-
-  const record = importedSettings as Record<string, unknown>
-  if (!Array.isArray(record.profiles) || record.profiles.length === 0) return settings
-
-  const imported = normalizeSettings({
-    customProviders: record.customProviders,
-    profiles: record.profiles,
-  })
-  const importedProfile = imported.profiles[0]
-  const activeProfile = findEquivalentApiProfile(settings, importedProfile, imported.customProviders)
-
-  return activeProfile
-    ? normalizeSettings({ ...settings, activeProfileId: activeProfile.id })
-    : settings
-}
-
 export function hasUrlSettingParams(searchParams: URLSearchParams) {
   return URL_SETTING_KEYS.some((key) => searchParams.has(key))
 }
@@ -83,7 +38,6 @@ export function clearUrlSettingParams(searchParams: URLSearchParams) {
 }
 
 export function buildSettingsFromUrlParams(currentSettings: Partial<AppSettings> | unknown, searchParams: URLSearchParams): Partial<AppSettings> {
-  const importedSettings = getUrlSettingsPayload(searchParams)
   const apiUrlParam = searchParams.get('apiUrl')
   const apiKeyParam = searchParams.get('apiKey')
   const codexCliParam = searchParams.get('codexCli')
@@ -94,9 +48,7 @@ export function buildSettingsFromUrlParams(currentSettings: Partial<AppSettings>
   const apiMode: ApiMode | undefined = apiModeParam === 'images' || apiModeParam === 'responses' ? apiModeParam : undefined
 
   const hasLegacyOpenAIParams = apiUrlParam !== null || apiKeyParam !== null || codexCliParam !== null || apiMode !== undefined || modelParam !== null || streamImagesParam !== null || streamPartialImagesParam !== null
-  const settings = importedSettings == null
-    ? normalizeSettings(currentSettings)
-    : activateFirstImportedProfile(mergeImportedSettings(currentSettings, importedSettings), importedSettings)
+  const settings = normalizeSettings(currentSettings)
 
   if (hasLegacyOpenAIParams) {
     const profileApiMode = apiMode ?? 'images'
@@ -106,10 +58,7 @@ export function buildSettingsFromUrlParams(currentSettings: Partial<AppSettings>
       apiMode: profileApiMode,
       model: profileApiMode === 'responses' ? DEFAULT_RESPONSES_MODEL : DEFAULT_IMAGES_MODEL,
     })
-    if (apiUrlParam !== null) profile.baseUrl = normalizeBaseUrl(apiUrlParam.trim())
-    if (apiKeyParam !== null) profile.apiKey = apiKeyParam.trim()
     if (modelParam !== null && modelParam.trim()) profile.model = modelParam.trim()
-    if (codexCliParam !== null) profile.codexCli = codexCliParam.trim().toLowerCase() === 'true'
     if (streamImagesParam !== null) profile.streamImages = streamImagesParam.trim().toLowerCase() === 'true'
     if (streamPartialImagesParam !== null) profile.streamPartialImages = normalizeStreamPartialImages(streamPartialImagesParam)
 
@@ -125,5 +74,5 @@ export function buildSettingsFromUrlParams(currentSettings: Partial<AppSettings>
     })
   }
 
-  return importedSettings == null ? {} : settings
+  return {}
 }
