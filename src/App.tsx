@@ -30,14 +30,22 @@ export default function App() {
     let cancelled = false
 
     void (async () => {
-      await bootstrapSmalliceSession().catch(() => undefined)
+      const bootstrap = await bootstrapSmalliceSession().catch((error) => ({
+        status: 'failed' as const,
+        message: error instanceof Error ? error.message : String(error),
+      }))
       const session = await fetchSmalliceSession().catch(() => null)
       if (cancelled || session?.authenticated) return
 
       const mainSiteUrl = getSmalliceMainSiteUrl()
+      const message =
+        bootstrap.status === 'failed'
+          ? `Smallice AI 授权同步失败：${bootstrap.message}\n\n请先返回主站完成登录，然后从主站入口重新打开 Draw。`
+          : '未获取到 Smallice AI 登录信息。\n\n请先返回主站完成登录，然后从主站入口重新打开 Draw。'
+
       setConfirmDialog({
         title: '需要登录 Smallice AI',
-        message: '未获取到 Smallice AI 登录信息。\n\n请先返回主站完成登录，然后从主站入口重新打开 Draw。',
+        message,
         confirmText: '返回主站登录',
         showCancel: false,
         icon: 'info',

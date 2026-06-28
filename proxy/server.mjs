@@ -9,6 +9,8 @@ const GATEWAY_BASE_URL = trimSlash(process.env.GATEWAY_BASE_URL || SUB2API_BASE_
 const COOKIE_NAME = process.env.COOKIE_NAME || "smallice_draw_token";
 const KEY_COOKIE_NAME = process.env.KEY_COOKIE_NAME || "smallice_draw_key_id";
 const COOKIE_MAX_AGE_SECONDS = Number(process.env.COOKIE_MAX_AGE_SECONDS || 86400);
+const COOKIE_SECURE = String(process.env.COOKIE_SECURE || "auto").toLowerCase();
+const COOKIE_SAME_SITE = normalizeSameSite(process.env.COOKIE_SAME_SITE || "Lax");
 const PROFILE_CACHE_MS = Number(process.env.PROFILE_CACHE_MS || 30000);
 const GATEWAY_REQUEST_TIMEOUT_MS = Number(process.env.GATEWAY_REQUEST_TIMEOUT_MS || 1800000);
 const API_PREFIX = "/tools/draw-api";
@@ -82,13 +84,13 @@ async function bootstrapSession(req, res) {
 
   const profile = await validateSub2Token(token);
   if (!profile) {
-    clearCookie(res, COOKIE_NAME);
-    clearCookie(res, KEY_COOKIE_NAME);
+    clearCookie(req, res, COOKIE_NAME);
+    clearCookie(req, res, KEY_COOKIE_NAME);
     sendJson(res, 401, { error: { code: "session_expired", message: "登录状态已失效，请返回 Smallice AI 主站重新登录后再打开 Draw。" } });
     return;
   }
 
-  setCookie(res, COOKIE_NAME, token);
+  setCookie(req, res, COOKIE_NAME, token);
   sendJson(res, 200, buildSessionPayload(profile, getCookie(req.headers.cookie, KEY_COOKIE_NAME)));
 }
 
@@ -112,7 +114,7 @@ async function sendKeys(req, res) {
   const keys = await listUserKeys(session.token, { forceRefresh });
   const selectedKeyId = await getValidSelectedKeyId(session.token, req.headers.cookie, keys);
   if (!selectedKeyId && keys.length === 1) {
-    setCookie(res, KEY_COOKIE_NAME, keys[0].id);
+    setCookie(req, res, KEY_COOKIE_NAME, keys[0].id);
   }
 
   sendJson(res, 200, {
@@ -135,12 +137,12 @@ async function selectKey(req, res) {
   const keys = await listUserKeys(session.token, { forceRefresh: true });
   const selected = keys.find((key) => key.id === keyId);
   if (!selected) {
-    clearCookie(res, KEY_COOKIE_NAME);
+    clearCookie(req, res, KEY_COOKIE_NAME);
     sendJson(res, 403, { error: { code: "invalid_key", message: "该 API Key 不存在或不属于当前用户。" } });
     return;
   }
 
-  setCookie(res, KEY_COOKIE_NAME, selected.id);
+  setCookie(req, res, KEY_COOKIE_NAME, selected.id);
   sendJson(res, 200, { ok: true, selectedKeyId: selected.id });
 }
 
@@ -170,7 +172,7 @@ async function proxyGateway(clientReq, clientRes, requestUrl) {
   }
   selected ||= keys[0];
   if (!cookieKeyId || selected.id !== cookieKeyId) {
-    setCookie(clientRes, KEY_COOKIE_NAME, selected.id);
+    setCookie(clientReq, clientRes, KEY_COOKIE_NAME, selected.id);
   }
 
   const targetPath = requestUrl.pathname.replace(API_PREFIX, "") + requestUrl.search;
@@ -229,8 +231,8 @@ async function getSession(req, res, sendError = true) {
 
   const profile = await validateSub2Token(token);
   if (!profile) {
-    clearCookie(res, COOKIE_NAME);
-    clearCookie(res, KEY_COOKIE_NAME);
+    clearCookie(req, res, COOKIE_NAME);
+    clearCookie(req, res, KEY_COOKIE_NAME);
     if (sendError) {
       sendJson(res, 401, { error: { code: "session_expired", message: "登录状态已失效，请返回 Smallice AI 主站重新登录后再打开 Draw。" } });
     }
@@ -418,15 +420,15 @@ function sendJson(res, status, payload) {
   res.end(JSON.stringify(payload));
 }
 
-function setCookie(res, name, value) {
+function setCookie(req, res, name, value) {
   appendSetCookie(
     res,
-    `${name}=${encodeURIComponent(value)}; Path=/; Max-Age=${COOKIE_MAX_AGE_SECONDS}; HttpOnly; Secure; SameSite=Lax`,
+    buildCookie(req, name, encodeURIComponent(value), `Max-Age=${COOKIE_MAX_AGE_SECONDS}`),
   );
 }
 
-function clearCookie(res, name) {
-  appendSetCookie(res, `${name}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`);
+function clearCookie(req, res, name) {
+  appendSetCookie(res, buildCookie(req, name, "", "Max-Age=0"));
 }
 
 function appendSetCookie(res, value) {
@@ -448,6 +450,34 @@ function getCookie(rawCookie, name) {
     if (rawName === name) return decodeURIComponent(rawValue.join("=") || "");
   }
   return "";
+}
+
+function buildCookie(req, name, value, maxAgePart) {
+  const parts = [`${name}=${value}`, "Path=/", maxAgePart, "HttpOnly", `SameSite=${COOKIE_SAME_SITE}`];
+  if (shouldUseSecureCookie(req)) {
+    parts.push("Secure");
+  }
+  return parts.join("; ");
+}
+
+function shouldUseSecureCookie(req) {
+  if (COOKIE_SECURE === "true" || COOKIE_SECURE === "1") return true;
+  if (COOKIE_SECURE === "false" || COOKIE_SECURE === "0") return false;
+
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "").split(",")[0].trim().toLowerCase();
+  if (forwardedProto) return forwardedProto === "https";
+
+  const forwardedSsl = String(req.headers["x-forwarded-ssl"] || "").toLowerCase();
+  if (forwardedSsl === "on") return true;
+
+  return Boolean(req.socket?.encrypted);
+}
+
+function normalizeSameSite(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "none") return "None";
+  if (normalized === "strict") return "Strict";
+  return "Lax";
 }
 
 function cleanToken(value) {
