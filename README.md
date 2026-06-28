@@ -27,6 +27,37 @@
 
 ---
 
+## ❤️ 赞助商
+
+<table>
+<tr>
+<td width="180" align="center" valign="middle">
+  <a href="https://www.5cookie.cc"><img src="https://github.com/user-attachments/assets/c2a1e98e-c172-49ff-b361-60bb32601daa" alt="5Cookie Code" width="150"></a>
+</td>
+<td valign="middle"><b><a href="https://www.5cookie.cc">5Cookie Code</a></b>&nbsp;是一家稳定高速的 API 中继服务提供商，为 Image-2、Claude Code、Codex 等平台或模型提供 API 中继服务。面向个人、团队和企业用户提供 AI 编码服务和 AI 生图服务。</td>
+</tr>
+<tr>
+<td width="180" align="center" valign="middle">
+  <a href="https://9527code.com/"><img src="https://github.com/user-attachments/assets/29eba620-e902-42f9-9c3b-2fb2d7b2e310" alt="9527 CODE" width="150"></a>
+</td>
+<td valign="middle"><b><a href="https://9527code.com/">9527 CODE</a></b>&nbsp;是企业级满血 AI 中转服务平台，专注提供 Claude Code、Codex 等主流模型的高稳定中转能力，为企业级 AI 使用提供稳定、合规、高效的一站式解决方案。</td>
+</tr>
+<tr>
+<td width="180" align="center" valign="middle">
+  <a href="https://code0.ai/?source=cooksleep"><img src="https://github.com/user-attachments/assets/515dc874-3b2b-4355-aeae-04eba6e6505d" alt="Code0" width="150"></a>
+</td>
+<td valign="middle"><b><a href="https://code0.ai/?source=cooksleep">Code0</a></b>&nbsp;是一家稳定高速的 AI API 中转服务商，支持 gpt-image、Claude Code、Codex 等主流模型，提供即充即用的 AI 生图与编码能力，面向个人、团队与企业用户。<a href="https://gpt-image-playground.cooksleep.dev/?apiUrl=https%3A%2F%2Fcode0.ai%2Fv1&apiMode=images&profileName=Code0">点此导入配置</a></td>
+</tr>
+<tr>
+<td width="180" align="center" valign="middle">
+  <a href="https://qiuqiutoken.com"><img src="https://github.com/user-attachments/assets/03fd9d8d-fba0-4643-9d83-47e386267b57" alt="球球Token" width="150"></a>
+</td>
+<td valign="middle"><b><a href="https://qiuqiutoken.com">球球Token</a></b>&nbsp;是一家高速稳定务实的 AI 中转服务站，支持 gpt-image-2、Codex、Claude Code 等主流模型，100% 缓存命中、文档齐备、k8s 高可用集群、多个 CN2 GIA 接入点、售后极速响应、企业开票。</td>
+</tr>
+</table>
+
+---
+
 ## 📸 界面预览
 
 <details>
@@ -83,6 +114,9 @@
 - **参考图与遮罩**：支持上传最多 16 张参考图（支持剪贴板和拖拽）。内置可视化遮罩编辑器，自动预处理以符合官方分辨率限制。
 - **批量与迭代**：支持单次多图生成；一键将满意结果转为参考图，无缝开启下一轮修改。
 - **流式生成预览**：`Images API` 与 `Responses API` 模式均支持流式接收中间步骤图像，缓解连接超时问题。
+- **透明背景后处理**：画廊模式下选择 PNG 格式后可开启透明背景功能，自动在提示词末尾追加工作流说明，要求模型使用纯绿色或纯洋红色背景，并在结果返回后本地去除原图中的背景色，保存为带透明通道的 PNG。
+
+  > 透明背景后处理功能为本地后处理流程，适用于图标、贴纸、单主体素材等场景，并非 API 原生透明通道（GPT-Image-2 不支持）。若主体边缘存在复杂发丝、半透明材质、强反光或与背景色接近的颜色，可能出现边缘残留或误抠。
 
 ### 🤖 Agent 多轮对话模式
 - **多轮对话与上下文记忆**：基于 Responses API 的对话式生成，Agent 会理解上下文并按需调用图像工具；支持 `@` 引用参考图或前面轮次生成的图片，并自动识别上下文中的图片。
@@ -97,6 +131,7 @@
 
 ### 📁 高效历史管理 (纯本地)
 - **瀑布流与画廊**：历史任务自动保存，支持按状态过滤、全屏大图预览与快捷下载。
+- **多收藏夹管理**：支持创建多个命名收藏夹，同一任务可归入多个收藏夹。提供独立的收藏夹概览视图（展示封面缩略图与任务数量），点击进入具体收藏夹后仍可叠加搜索与状态筛选。收藏夹支持拖拽排序、重命名、设置默认收藏夹，以及按收藏夹为单位批量打包下载 ZIP。
 - **快捷批量操作**：桌面端支持鼠标拖拽框选、Ctrl/⌘ 连选，移动端支持顺滑侧滑多选；轻松实现批量收藏与清理。
 - **优化的图片查看与下载**：大图预览支持左右滑动切换、移动端长按弹出操作菜单，支持快捷下载与批量下载。
 - **极致性能与隐私**：所有记录与图片均存放在浏览器 IndexedDB 中（采用 SHA-256 去重压缩），不经过任何第三方服务器。支持一键打包导出 ZIP 备份。
@@ -104,11 +139,12 @@
 ### 🔌 多配置与服务商增强
 - **多配置管理**：支持创建并保存多个 API 配置（包含服务商、API Key、模型等），按需快速切换；支持一键复制当前配置到列表底部，并通过拖拽对配置列表与服务商列表进行自定义排序。
 - **多服务商接入**：内置 OpenAI 兼容接口（含 `Images API` 和 `Responses API`）、fal.ai（支持队列），并支持通过 JSON 导入自定义 HTTP 服务商配置（兼容同步/异步任务）。
+- **Agent 模式独立 API 配置**：支持为 Agent 模式使用原生（Response API）或混合（Response API + Image API）的独立 API 配置，解决部分服务商/模型不支持 `image_generation` 工具的问题。
 - **API 代理**：OpenAI 兼容接口与 fal.ai 均可配置自定义代理。其中 OpenAI 兼容接口可开启同源 `/api-proxy/` 代理，交由 Docker 或本地开发环境转发至真实 API，绕开浏览器 CORS 限制。
 - **Codex CLI 兼容模式**：对上游为 Codex CLI 的 API，开启后应用 Codex CLI 实际支持的参数，并将多图生成拆分为并发单图。
 - **提示词防改写**：Responses API 会始终在请求文本前加入强制指令防止提示词被改写；开启 Codex CLI 模式后，Images API 也会获得同等保护。
 - **智能诊断提示**：当检测到接口异常改写行为或缺少常规参数时，自动提示开启相应的兼容模式。
-- **习惯配置**：支持设置提交后清空输入、重启后保留历史输入、临时复用历史任务 API 配置等。
+- **习惯配置**：支持设置提交后清空输入、重启后保留历史输入、临时复用历史任务 API 配置、关闭提示词防改写等。
 
 ---
 
@@ -126,6 +162,8 @@
 **配置默认 API URL**：在 Vercel 项目的 **Settings → Environment Variables** 中添加 `VITE_DEFAULT_API_URL`（如 `https://api.openai.com/v1`），然后重新部署即可生效。
 
 **导入自定义服务商配置**：`VITE_DEFAULT_API_URL` 除了填写普通 API 地址外，也支持直接填写 `.json` 配置 URL 或带 `settings` 参数的分享 URL。设为配置 URL 时，页面启动后会自动导入其中的自定义服务商和 API 配置，设置页显示的是配置 JSON 中 profile 定义的 `baseUrl`（而非配置 URL 本身）。
+
+**仅展示默认配置**：设置 `VITE_SHOW_DEFAULT_CONFIG_ONLY=true` 后，如果已配置默认 API URL 或默认代理，前端会禁用“当前配置”和“服务商类型”的下拉切换，只允许使用默认配置和默认服务商类型。通过页面 URL 参数传入的配置只会覆盖当前配置字段，不会新建配置、切换服务商类型或导入自定义服务商；`VITE_DEFAULT_API_URL` 本身仍可使用配置 URL 来定义部署端默认服务商。
 
 **绑定自定义域名 (国内直连)**：Vercel 默认分配的 `.vercel.app` 域名在国内通常无法直接访问。如果你希望在国内直连访问，请在 Vercel 项目的 **Settings → Domains** 中绑定你自己的域名。
 
@@ -173,6 +211,8 @@ $env:VITE_DEFAULT_API_URL="https://api.openai.com/v1"; npm run deploy:cf
 
 **导入自定义服务商配置**：`VITE_DEFAULT_API_URL` 除了填写普通 API 地址外，也支持直接填写 `.json` 配置 URL 或带 `settings` 参数的分享 URL。设为配置 URL 时，页面启动后会自动导入其中的自定义服务商和 API 配置，设置页显示的是配置 JSON 中 profile 定义的 `baseUrl`（而非配置 URL 本身）。
 
+**仅展示默认配置**：构建前设置 `VITE_SHOW_DEFAULT_CONFIG_ONLY=true` 后，如果已配置默认 API URL 或默认代理，前端会禁用“当前配置”和“服务商类型”的下拉切换。通过页面 URL 参数传入的配置只会覆盖当前配置字段，不会新建配置、切换服务商类型或导入自定义服务商；`VITE_DEFAULT_API_URL` 本身仍可使用配置 URL 来定义部署端默认服务商。
+
 </details>
 
 <details>
@@ -186,6 +226,7 @@ $env:VITE_DEFAULT_API_URL="https://api.openai.com/v1"; npm run deploy:cf
 - `API_PROXY_URL`：配置内置代理实际转发到的完整 API 基础地址（仅开启代理时有效）。代理不会自动补 `/v1`，OpenAI 兼容接口通常必须填写到版本前缀，如 `https://api.openai.com/v1`。
 - `ENABLE_API_PROXY`：设为 `true` 开启容器内置 Nginx 同源代理，用于解决浏览器跨域（CORS）限制。开启后，前端 **API 代理** 开关默认开启，浏览器会请求同源的 `/api-proxy/{接口相对路径}`，再由 Nginx 拼接到 `API_PROXY_URL` 后转发；用户仍可在设置中手动关闭。
 - `LOCK_API_PROXY`：设为 `true` 时，在 `ENABLE_API_PROXY=true` 的前提下将前端 **API 代理** 开关强制锁定为开启，用户无法关闭。
+- `SHOW_DEFAULT_CONFIG_ONLY`：设为 `true` 后，如果已配置默认 API URL 或默认代理，前端会禁用“当前配置”和“服务商类型”的下拉切换，只允许使用默认配置和默认服务商类型。通过页面 URL 参数传入的配置只会覆盖当前配置字段，不会新建配置、切换服务商类型或导入自定义服务商；`DEFAULT_API_URL` 本身仍可使用配置 URL 来定义部署端默认服务商。
 - `HOST` / `PORT`：指定容器内 Nginx 监听的地址和端口（默认 `0.0.0.0:80`）。
 
 > ⚠️ **安全警告**：开启 API 代理后，任何人都能将你的服务器作为代理来请求目标 API。建议仅在有访问控制（如 IP 白名单）或本地网络中开启。
@@ -270,6 +311,8 @@ services:
 
 **导入自定义服务商配置**：`VITE_DEFAULT_API_URL` 除了填写普通 API 地址外，也支持直接填写 `.json` 配置 URL 或带 `settings` 参数的分享 URL。设为配置 URL 时，页面启动后会自动导入其中的自定义服务商和 API 配置，设置页显示的是配置 JSON 中 profile 定义的 `baseUrl`（而非配置 URL 本身）。
 
+**仅展示默认配置**：在 `.env.local` 中加入 `VITE_SHOW_DEFAULT_CONFIG_ONLY=true` 后，如果已配置默认 API URL 或默认代理，前端会禁用“当前配置”和“服务商类型”的下拉切换。通过页面 URL 参数传入的配置只会覆盖当前配置字段，不会新建配置、切换服务商类型或导入自定义服务商；`VITE_DEFAULT_API_URL` 本身仍可使用配置 URL 来定义部署端默认服务商。
+
 ```bash
 npm install
 npm run dev
@@ -317,7 +360,10 @@ npm run build
 - `?apiKey=sk-xxxx`
 - `?apiMode=images` 或 `?apiMode=responses`（未传时默认为 `images`）
 - `?model=gpt-image-2`（未传时按 `apiMode` 使用默认模型）
+- `?profileName=我的配置`（设置配置名称，未传时默认为 `URL 参数配置`）
 - `?codexCli=true`（开启 Codex CLI 兼容模式）
+- `?streamImages=true`（开启流式传输）
+- `?streamPartialImages=2`（请求中间步骤图像数，需配合 `streamImages=true` 使用）
 
 例如，集成到 New API 的聊天系统：
 

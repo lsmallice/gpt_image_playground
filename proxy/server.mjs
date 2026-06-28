@@ -275,6 +275,13 @@ async function listUserKeys(token, options = {}) {
   const cached = keyCache.get(cacheKey);
   if (!options.forceRefresh && cached && cached.expiresAt > Date.now()) return cached.keys;
 
+  const eligibleKeys = await fetchImageEligibleKeys(token);
+  const eligibleIds = new Set(eligibleKeys.map((item) => String(item.id)));
+  if (!eligibleIds.size) {
+    keyCache.set(cacheKey, { keys: [], expiresAt: Date.now() + 10000 });
+    return [];
+  }
+
   const payload = await fetchJson(`${SUB2API_BASE_URL}/api/v1/keys?page=1&page_size=100`, {
     headers: {
       accept: "application/json",
@@ -284,18 +291,29 @@ async function listUserKeys(token, options = {}) {
   const data = unwrapEnvelope(payload);
   const items = Array.isArray(data?.items) ? data.items : [];
   const keys = items
-    .filter((item) => item?.key && item.status === "active" && (!item.group?.status || item.group.status === "active"))
+    .filter((item) => item?.key && eligibleIds.has(String(item.id)) && item.status === "active" && (!item.group?.status || item.group.status === "active"))
     .map((item, index) => ({
       id: String(item.id || item.key || index),
-      name: String(item.name || `API Key ${index + 1}`),
+      name: String(eligibleKeys.find((key) => String(key.id) === String(item.id))?.name || item.name || `API Key ${index + 1}`),
       key: String(item.key),
-      groupName: item.group?.name ? String(item.group.name) : "",
+      groupName: String(eligibleKeys.find((key) => String(key.id) === String(item.id))?.group_name || item.group?.name || ""),
       status: String(item.status || "active"),
-      allowImageGeneration: item.group?.allow_image_generation !== false,
+      imageEligible: true,
     }));
 
   keyCache.set(cacheKey, { keys, expiresAt: Date.now() + 10000 });
   return keys;
+}
+
+async function fetchImageEligibleKeys(token) {
+  const payload = await fetchJson(`${SUB2API_BASE_URL}/api/v1/canvas/image-keys`, {
+    headers: {
+      accept: "application/json",
+      authorization: `Bearer ${token}`,
+    },
+  });
+  const data = unwrapEnvelope(payload);
+  return Array.isArray(data?.items) ? data.items.filter((item) => item?.image_eligible !== false) : [];
 }
 
 async function getValidSelectedKeyId(token, rawCookie, providedKeys = null) {
@@ -311,7 +329,7 @@ function publicKey(key) {
     name: key.name,
     groupName: key.groupName,
     status: key.status,
-    allowImageGeneration: key.allowImageGeneration,
+    imageEligible: true,
   };
 }
 
