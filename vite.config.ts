@@ -5,6 +5,12 @@ import { normalizeDevProxyConfig } from './src/lib/devProxy'
 
 const pkg = JSON.parse(readFileSync('./package.json', 'utf-8'))
 
+function normalizeBasePath(value: string | undefined): string {
+  const trimmed = value?.trim()
+  if (!trimmed || trimmed === '/') return '/'
+  return `/${trimmed.replace(/^\/+|\/+$/g, '')}/`
+}
+
 function loadDevProxyConfig() {
   try {
     return normalizeDevProxyConfig(
@@ -22,7 +28,7 @@ export default defineConfig(({ command }) => {
 
   return {
     plugins: [react()],
-    base: '/tools/draw/',
+    base: normalizeBasePath(process.env.VITE_APP_BASE_PATH || '/tools/draw/'),
     define: {
       __APP_VERSION__: JSON.stringify(pkg.version),
       __DEV_PROXY_CONFIG__: JSON.stringify(devProxyConfig),
