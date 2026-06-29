@@ -13,6 +13,8 @@ const COOKIE_SECURE = String(process.env.COOKIE_SECURE || "auto").toLowerCase();
 const COOKIE_SAME_SITE = normalizeSameSite(process.env.COOKIE_SAME_SITE || "Lax");
 const PROFILE_CACHE_MS = Number(process.env.PROFILE_CACHE_MS || 30000);
 const GATEWAY_REQUEST_TIMEOUT_MS = Number(process.env.GATEWAY_REQUEST_TIMEOUT_MS || 1800000);
+const GATEWAY_JSON_RETRY_MAX_BYTES = Number(process.env.GATEWAY_JSON_RETRY_MAX_BYTES || 4 * 1024 * 1024);
+const GATEWAY_TRANSIENT_RETRY_DELAY_MS = Number(process.env.GATEWAY_TRANSIENT_RETRY_DELAY_MS || 500);
 const API_PREFIX = "/tools/draw-api";
 const OPENAI_PREFIX = `${API_PREFIX}/v1`;
 const SELECTED_KEY_HEADER_NAME = "x-smallice-draw-key-id";
@@ -178,14 +180,117 @@ async function proxyGateway(clientReq, clientRes, requestUrl) {
   const targetPath = requestUrl.pathname.replace(API_PREFIX, "") + requestUrl.search;
   const target = new URL(targetPath, GATEWAY_BASE_URL);
   const headers = buildGatewayHeaders(clientReq.headers, selected.key, target);
-  const requester = target.protocol === "https:" ? https : http;
 
+  if (canRetryBufferedGatewayRequest(clientReq)) {
+    const body = await readRequestBodyBuffer(clientReq, GATEWAY_JSON_RETRY_MAX_BYTES).catch((error) => {
+      if (error?.code === "body_too_large") {
+        sendOpenAIError(clientRes, 413, "request_too_large", "请求体过大，请减小图片或改用分片上传。");
+        return null;
+      }
+      throw error;
+    });
+    if (!body) return;
+
+    await sendBufferedGatewayRequest({
+      body,
+      clientReq,
+      clientRes,
+      headers,
+      method: clientReq.method,
+      target,
+    });
+    return;
+  }
+
+  streamGatewayRequest(clientReq, clientRes, target, headers);
+}
+
+function streamGatewayRequest(clientReq, clientRes, target, headers) {
+  const upstreamReq = createGatewayRequest(clientReq.method, target, headers, clientRes);
+
+  upstreamReq.on("error", (error) => {
+    console.error("[smallice-draw-proxy] gateway request failed", error);
+    if (clientRes.headersSent) return;
+    sendOpenAIError(clientRes, 502, "gateway_failed", "Smallice API 网关请求失败，请稍后重试。");
+  });
+
+  clientReq.on("aborted", () => upstreamReq.destroy(new Error("client request aborted")));
+  clientRes.on("close", () => {
+    if (!clientRes.writableEnded) upstreamReq.destroy(new Error("client response closed"));
+  });
+
+  clientReq.pipe(upstreamReq);
+}
+
+async function sendBufferedGatewayRequest({ body, clientReq, clientRes, headers, method, target }) {
+  const bufferedHeaders = { ...headers, "content-length": String(body.length) };
+  delete bufferedHeaders["transfer-encoding"];
+
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    const result = await new Promise((resolve) => {
+      let settled = false;
+      let upstreamReq;
+
+      const finish = (value) => {
+        if (settled) return;
+        settled = true;
+        clientReq.off("aborted", onClientAborted);
+        clientRes.off("close", onClientClosed);
+        resolve(value);
+      };
+
+      const onClientAborted = () => {
+        upstreamReq?.destroy(new Error("client request aborted"));
+        finish("done");
+      };
+
+      const onClientClosed = () => {
+        if (!clientRes.writableEnded) {
+          upstreamReq?.destroy(new Error("client response closed"));
+          finish("done");
+        }
+      };
+
+      clientReq.on("aborted", onClientAborted);
+      clientRes.on("close", onClientClosed);
+
+      upstreamReq = createGatewayRequest(method, target, bufferedHeaders, clientRes, () => finish("done"));
+
+      upstreamReq.on("error", (error) => {
+        if (settled) return;
+        if (clientRes.headersSent) {
+          finish("done");
+          return;
+        }
+        if (attempt < 2 && isRetryableGatewayError(error)) {
+          console.warn("[smallice-draw-proxy] gateway request transient failure, retrying", {
+            attempt,
+            code: error.code,
+            path: target.pathname,
+          });
+          setTimeout(() => finish("retry"), GATEWAY_TRANSIENT_RETRY_DELAY_MS);
+          return;
+        }
+
+        console.error("[smallice-draw-proxy] gateway request failed", error);
+        sendOpenAIError(clientRes, 502, "gateway_failed", "Smallice API 网关请求失败，请稍后重试。");
+        finish("done");
+      });
+
+      upstreamReq.end(body);
+    });
+    if (result !== "retry" || clientRes.headersSent || clientRes.destroyed) return;
+  }
+}
+
+function createGatewayRequest(method, target, headers, clientRes, onResponseEnd) {
+  const requester = target.protocol === "https:" ? https : http;
   const upstreamReq = requester.request(
     {
       protocol: target.protocol,
       hostname: target.hostname,
       port: target.port || (target.protocol === "https:" ? 443 : 80),
-      method: clientReq.method,
+      method,
       path: target.pathname + target.search,
       headers,
     },
@@ -194,14 +299,12 @@ async function proxyGateway(clientReq, clientRes, requestUrl) {
       normalizeProxyResponseHeaders(headers);
       clientRes.writeHead(upstreamRes.statusCode || 502, headers);
       upstreamRes.pipe(clientRes);
+      if (onResponseEnd) {
+        upstreamRes.on("end", () => onResponseEnd(true));
+        upstreamRes.on("error", () => onResponseEnd(true));
+      }
     },
   );
-
-  upstreamReq.on("error", (error) => {
-    console.error("[smallice-draw-proxy] gateway request failed", error);
-    if (clientRes.headersSent) return;
-    sendOpenAIError(clientRes, 502, "gateway_failed", "Smallice API 网关请求失败。");
-  });
 
   upstreamReq.setTimeout(GATEWAY_REQUEST_TIMEOUT_MS, () => {
     console.error("[smallice-draw-proxy] gateway request timeout", {
@@ -212,12 +315,22 @@ async function proxyGateway(clientReq, clientRes, requestUrl) {
     upstreamReq.destroy(new Error("gateway request timeout"));
   });
 
-  clientReq.on("aborted", () => upstreamReq.destroy(new Error("client request aborted")));
-  clientRes.on("close", () => {
-    if (!clientRes.writableEnded) upstreamReq.destroy(new Error("client response closed"));
-  });
+  return upstreamReq;
+}
 
-  clientReq.pipe(upstreamReq);
+function canRetryBufferedGatewayRequest(req) {
+  const method = String(req.method || "GET").toUpperCase();
+  if (!["POST", "PUT", "PATCH"].includes(method)) return false;
+
+  const contentType = String(req.headers["content-type"] || "").toLowerCase();
+  if (!contentType.includes("application/json")) return false;
+
+  const contentLength = Number(req.headers["content-length"] || 0);
+  return !contentLength || contentLength <= GATEWAY_JSON_RETRY_MAX_BYTES;
+}
+
+function isRetryableGatewayError(error) {
+  return ["ECONNRESET", "ECONNREFUSED", "EPIPE", "ETIMEDOUT"].includes(error?.code);
 }
 
 async function getSession(req, res, sendError = true) {
@@ -417,6 +530,37 @@ function readRequestBody(req) {
     req.on("data", (chunk) => chunks.push(chunk));
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
+  });
+}
+
+function readRequestBodyBuffer(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    let done = false;
+    req.on("data", (chunk) => {
+      if (done) return;
+      size += chunk.length;
+      if (size > maxBytes) {
+        done = true;
+        const error = new Error("request body too large");
+        error.code = "body_too_large";
+        reject(error);
+        req.destroy(error);
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      if (done) return;
+      done = true;
+      resolve(Buffer.concat(chunks));
+    });
+    req.on("error", (error) => {
+      if (done) return;
+      done = true;
+      reject(error);
+    });
   });
 }
 
